@@ -32,6 +32,7 @@ pub struct Ai {
     pub endpoint: String,
     pub default_model: String,
 	pub init_prompt: String,
+	pub engage_time: i64,
 }
 
 

@@ -17,9 +17,10 @@ pub fn exec(msg: &str) -> Result<Vec<Data>, crate::handler::DynErr> {
 			.expect("failed to execute process")
 	};
 
-	let ret = vec![Data::string(output.status.to_string()),
-		Data::string(String::from_utf8_lossy(&output.stdout).to_string()),
+	let ret = vec![Data::string(output.status.to_string()+"\n"),
+		Data::string(String::from_utf8_lossy(&output.stdout).to_string()+"\n"),
 		Data::string(String::from_utf8_lossy(&output.stderr).to_string())];
+	
 
 	Ok(ret)
 }

@@ -42,6 +42,23 @@ pub fn set_model(gid: u64, db:Arc<Client>, model: &str) -> Result<Vec<Data>, cra
 	Ok(vec![Data::string("Model set".to_string())])
 }
 
+pub fn check_join(gid: u64, db:Arc<Client>) -> Result<bool, crate::handler::DynErr> {
+	let mut conn = db.get_connection()?;
+	Ok(conn.exists(format!("ai:{}:JOIN", gid))?)
+}
+
+pub fn set_join(gid: u64, db:Arc<Client>) -> Result<(), crate::handler::DynErr> {
+	let mut conn = db.get_connection()?;
+	let key = format!("ai:{}:JOIN", gid);
+	if conn.exists(&key)? {
+		let _:() = conn.expire(key, AI_ENGAGE_TIME.lock().unwrap().clone())?;
+	}else{
+		let _:() = conn.set(&key, 1)?;
+		let _:() = conn.expire(key, AI_ENGAGE_TIME.lock().unwrap().clone())?;
+	}
+	Ok(())
+}
+
 
 pub async fn main_conversation(gid: Option<u64>, db:Arc<Client>, msg: &str) -> Result<Vec<Data>, crate::handler::DynErr>{
 	// Acquire mutex lock to allow only one main_conversation at a time.

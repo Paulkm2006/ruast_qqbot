@@ -48,11 +48,11 @@ pub async fn explain_image(img: ImageItem) -> Result<String, crate::handler::Dyn
 		item_id: "msg:".to_owned()+&msg_id,
 		conversation_id: "conv:".to_owned()+&conv,
 		item_type: "question".to_string(),
-		summary: "解释这张图片 ".to_string(),
+		summary: "用简洁的语言解释这张图片 ".to_string(),
 		parent_item_id: Some("msg:".to_owned()+&start_id),
 		data: ItemData {
 			data_type: "file_with_text".to_string(),
-			content: "解释这张图片 ".to_string(),
+			content: "用简洁的语言解释这张图片 ".to_string(),
 			quote_content: None,
 			max_token: Some(0),
 			is_incognito: Some(true),

@@ -66,7 +66,6 @@ async fn process_command(msg: &str, sender: &Map<String, Value>, db: Arc<Client>
                 allow!(sender, Identity::Owner); // Require owner for model
                 crate::module::ai::set_model(gid, db, args.get(1).unwrap_or(&""))?
             } else {
-                println!("AI command: {:?}", args);
                 crate::module::ai::main_conversation(Some(gid), db, &args.join(" ")).await?
             }
         }
@@ -78,8 +77,10 @@ async fn process_command(msg: &str, sender: &Map<String, Value>, db: Arc<Client>
     Ok(ret)
 }
 
-async fn default_handler(msg: &str, img: &Vec<ImgData>, _sender: &Map<String, Value>, db:Arc<Client>, gid: u64) -> Result<Vec<Data>, DynErr> {
-    let mut prompt = String::new();
+async fn default_handler(sender: &str, msg: &str, img: &Vec<ImgData>, _sender: &Map<String, Value>, db:Arc<Client>, gid: u64) -> Result<Vec<Data>, DynErr> {
+    
+    
+    let mut prompt = sender.to_owned() + "说：\n";
     if !img.is_empty() {
         for i in img {
             let desc = crate::module::ai_img::process_image(&i).await?;
@@ -135,7 +136,6 @@ pub async fn handle(msg: &Value, db: Arc<Client>) -> Result<Option<RetMessage>, 
             if let Ok(img_data) = serde_json::from_value::<ImgData>(segment["data"].clone()){
                 if img_data.file_size.parse::<u64>().unwrap() > 1024 {
                     in_img.push(img_data);
-                    at = true;
                 }
             }
         }
@@ -146,11 +146,19 @@ pub async fn handle(msg: &Value, db: Arc<Client>) -> Result<Option<RetMessage>, 
             let v = process_command(&in_msg, &s, db, gid).await?;
             Ok(Some(resp(v, gid)))
         } else {
-            let v = default_handler(&in_msg, &in_img, &s, db, gid).await?;
+            crate::module::ai::set_join(gid, db.clone())?;
+            let nickname = s["nickname"].as_str().unwrap_or_else(|| "Unknown");
+            let v = default_handler(nickname, &in_msg, &in_img, &s, db, gid).await?;
             Ok(Some(resp(v, gid)))
         }
     }else{
-        Ok(None)
+        if crate::module::ai::check_join(gid, db.clone())? {
+            let nickname = s["nickname"].as_str().unwrap_or_else(|| "Unknown");
+            let v = default_handler(nickname, &in_msg, &in_img, &s, db, gid).await?;
+            Ok(Some(resp(v, gid)))
+        } else {
+            Ok(None)
+        }
     }
 }
 

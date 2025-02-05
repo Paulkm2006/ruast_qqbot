@@ -21,6 +21,7 @@ async fn main() -> std::io::Result<()> {
     constants::set_ai_endpoint(config.ai.endpoint);
     constants::set_ai_default_model(config.ai.default_model);
     constants::set_ai_init_prompt(config.ai.init_prompt);
+    constants::set_ai_engage_time(config.ai.engage_time);
 
     // Initialize SQLite database connection
     let db = Client::open(config.redis.url).unwrap();
