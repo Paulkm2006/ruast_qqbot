@@ -97,12 +97,19 @@ pub async fn main_conversation(gid: Option<u64>, db:Arc<Client>, msg: &str) -> R
 
 pub async fn conversation(gid: u64, model: &str, bot: &str, db:Arc<Client>, msg: &str, tool: bool) -> Result<String, crate::handler::DynErr> {
 
-	let mut conn = db.get_connection()?;
-	let conv: String = conn.get(format!("ai:{}:{}:conv", gid, bot))?;
-	let prev: String = conn.get(format!("ai:{}:{}:prev", gid, bot))?;
-	let now: String = conn.get(format!("ai:{}:{}:now", gid, bot))?;
-	let count: i32 = conn.get(format!("ai:{}:{}:count", gid, bot))?;
 
+
+	let (conv, prev, now, count) = if !tool {
+		let mut conn = db.get_connection()?;
+		let conv: String = conn.get(format!("ai:{}:{}:conv", gid, bot))?;
+		let prev: String = conn.get(format!("ai:{}:{}:prev", gid, bot))?;
+		let now: String = conn.get(format!("ai:{}:{}:now", gid, bot))?;
+		let count: i32 = conn.get(format!("ai:{}:{}:count", gid, bot))?;
+		(conv, prev, now, count)
+	} else {
+		(Uuid::new_v4().to_string(), Uuid::new_v4().to_string(), Uuid::new_v4().to_string(), 0)
+	};
+	
 
 	let next_msg = Uuid::new_v4().to_string();
 
@@ -172,11 +179,12 @@ pub async fn conversation(gid: u64, model: &str, bot: &str, db:Arc<Client>, msg:
 
 	let resp = send_request(&req).await?;
 
-
-	let mut conn = db.get_connection()?;
-	let _: () = conn.set(format!("ai:{}:{}:prev", gid, bot), next_msg)?;
-	let _: () = conn.set(format!("ai:{}:{}:now", gid, bot), Uuid::new_v4().to_string())?;
-	let _: () = conn.incr(format!("ai:{}:{}:count", gid, bot), 1)?;
+	if !tool {
+		let mut conn = db.get_connection()?;
+		let _: () = conn.set(format!("ai:{}:{}:prev", gid, bot), next_msg)?;
+		let _: () = conn.set(format!("ai:{}:{}:now", gid, bot), Uuid::new_v4().to_string())?;
+		let _: () = conn.incr(format!("ai:{}:{}:count", gid, bot), 1)?;
+	}
 
     Ok(resp)
 }
@@ -194,10 +202,10 @@ async fn use_tool(db: Arc<Client>, query: &str) -> Result<String, crate::handler
 	};
 	match tool{
 		"search" | "getLastRate" | "getCryptoInformation" | "getIpInfo" | "searchNews" => {
-			conversation(0, "claude-3.5-sonnet", "jv6tFQ5q", db, query, true).await
+			conversation(0, "gpt-4o", "jv6tFQ5q", db, query, true).await
 		},
 		"readURL" | "getTopNews" | "getCurrentTime" | "getWeather" => {
-			conversation(0, "claude-3.5-sonnet", "zzWzZzSg", db, query, true).await
+			conversation(0, "gpt-4o", "zzWzZzSg", db, query, true).await
 		},
 		_ => Ok("不合法的调用".to_owned()),
 	}
@@ -219,6 +227,7 @@ pub async fn send_request(req: &ChatData) -> Result<String, crate::handler::DynE
     let request_url = reqwest::Url::parse(AI_ENDPOINT.lock().unwrap().as_str())?;
     let request = client.post(request_url)
         .json(&req);
+
 
     // Use server-sent events to receive response
     let mut event_source = EventSource::new(request)?;
