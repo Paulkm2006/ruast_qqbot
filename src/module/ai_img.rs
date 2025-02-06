@@ -106,7 +106,7 @@ pub async fn upload_image(filename: &str, file_size: u64, url: &str) -> Result<I
 
 	let jar = Arc::new(reqwest::cookie::Jar::default());
     jar.add_cookie_str(
-        format!("session_id={}", AI_TOKEN.lock().unwrap().as_str()).as_str(),
+        format!("session_id={}", AI_TOKEN.read().unwrap().as_str()).as_str(),
         &reqwest::Url::parse("https://api.monica.im").unwrap()
     );
 

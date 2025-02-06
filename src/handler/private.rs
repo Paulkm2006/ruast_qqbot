@@ -20,13 +20,12 @@ async fn process_command(msg: &str, sender: &Map<String, Value>, db: Arc<Client>
             crate::module::ping::ping(&sender["nickname"].as_str().unwrap())
         }
         "exec" => {
-            if sender["user_id"].as_u64().unwrap() != *OWNER_ID.lock().unwrap() {
+            if sender["user_id"].as_u64().unwrap() != *OWNER_ID.read().unwrap() {
 				return Ok(vec![Data::string("Permission denied: Owner required".to_string())]);
 			}
             crate::module::exec::exec(&args.join(" "))?
         }
         "ai" => {
-			println!("AI command: {:?}", args);
             if args.get(0) == Some(&"!clear") {
                 crate::module::ai::clear_record(0, db.clone(), "main")?;
                 if args.get(1) == Some(&"all") {
@@ -88,7 +87,6 @@ pub async fn handle(msg: &Value, db: Arc<Client>) -> Result<Option<RetMessage>, 
 
     if in_msg.starts_with("~") {
         let v = process_command(&in_msg, &s, db).await?;
-		println!("111");
         Ok(Some(resp(v, msg["target_id"].as_u64().unwrap())))
     } else {
         let v = default_handler(&in_msg, &s)?;

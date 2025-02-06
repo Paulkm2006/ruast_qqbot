@@ -9,18 +9,15 @@ use once_cell::sync::Lazy;
 
 use crate::dto::{*};
 
-
-// Global mutex to ensure single execution of main_conversation
-static MAIN_CONVO_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+// Add global lock to ensure a single main conversation process at a time.
+static MAIN_CONVO_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 pub fn clear_record(gid: u64, db:Arc<Client>, b: &str) -> Result<(), crate::handler::DynErr> {
-
-
 	let mut conn = db.get_connection()?;
 	let bot;
 
 	if b == "main" {
-		let main_model: String = conn.get(format!("ai:{}:model",gid)).unwrap_or_else(|_| AI_DEFAULT_MODEL.lock().unwrap().clone());
+		let main_model: String = conn.get(format!("ai:{}:model",gid)).unwrap_or_else(|_| AI_DEFAULT_MODEL.read().unwrap().clone());
 		bot = main_model.replace("-", "_").replace(".", "_");
 	}else{
 		bot = b.to_string();
@@ -51,19 +48,18 @@ pub fn set_join(gid: u64, db:Arc<Client>) -> Result<(), crate::handler::DynErr> 
 	let mut conn = db.get_connection()?;
 	let key = format!("ai:{}:JOIN", gid);
 	if conn.exists(&key)? {
-		let _:() = conn.expire(key, AI_ENGAGE_TIME.lock().unwrap().clone())?;
+		let _:() = conn.expire(key, AI_ENGAGE_TIME.read().unwrap().clone())?;
 	}else{
 		let _:() = conn.set(&key, 1)?;
-		let _:() = conn.expire(key, AI_ENGAGE_TIME.lock().unwrap().clone())?;
+		let _:() = conn.expire(key, AI_ENGAGE_TIME.read().unwrap().clone())?;
 	}
 	Ok(())
 }
 
 
 pub async fn main_conversation(gid: Option<u64>, db:Arc<Client>, msg: &str) -> Result<Vec<Data>, crate::handler::DynErr>{
-	// Acquire mutex lock to allow only one main_conversation at a time.
-	let _lock = MAIN_CONVO_MUTEX.lock().await;
-	
+    // Ensure only one main conversation runs concurrently.
+    let _lock = MAIN_CONVO_LOCK.lock().await;
 	let gid = match gid {
 		Some(gid) => gid,
 		None => 0,
@@ -71,7 +67,7 @@ pub async fn main_conversation(gid: Option<u64>, db:Arc<Client>, msg: &str) -> R
 
 	let mut conn = db.get_connection()?;
 
-	let main_model: String = conn.get(format!("ai:{}:model",gid)).unwrap_or_else(|_| AI_DEFAULT_MODEL.lock().unwrap().clone());
+	let main_model: String = conn.get(format!("ai:{}:model",gid)).unwrap_or_else(|_| AI_DEFAULT_MODEL.read().unwrap().clone());
 	let main_bot = main_model.clone().replace("-", "_").replace(".", "_");
 
 	let resp;
@@ -84,7 +80,6 @@ pub async fn main_conversation(gid: Option<u64>, db:Arc<Client>, msg: &str) -> R
 		println!("AI response: {:?}", main_resp);
 		if main_resp.starts_with("!#[") {
 			let tool_resp = use_tool(db.clone(), &main_resp).await?;
-			println!("Tool response: {:?}", tool_resp);
 			next_msg = tool_resp;
 		} else {
 			resp = main_resp;
@@ -133,7 +128,7 @@ pub async fn conversation(gid: u64, model: &str, bot: &str, db:Arc<Client>, msg:
 			},
 		});
 		if !tool {
-			msg = INIT_PROMPT.lock().unwrap().clone() + &msg;
+			msg = INIT_PROMPT.read().unwrap().clone() + &msg;
 		}
 	}
 
@@ -216,7 +211,7 @@ pub async fn send_request(req: &ChatData) -> Result<String, crate::handler::DynE
     // Setup cookie jar
     let jar = Arc::new(reqwest::cookie::Jar::default());
     jar.add_cookie_str(
-        format!("session_id={}", AI_TOKEN.lock().unwrap().as_str()).as_str(),
+        format!("session_id={}", AI_TOKEN.read().unwrap().as_str()).as_str(),
         &reqwest::Url::parse("https://api.monica.im").unwrap()
     );
 
@@ -224,7 +219,7 @@ pub async fn send_request(req: &ChatData) -> Result<String, crate::handler::DynE
         .cookie_provider(Arc::clone(&jar))
         .build()?;
 
-    let request_url = reqwest::Url::parse(AI_ENDPOINT.lock().unwrap().as_str())?;
+    let request_url = reqwest::Url::parse(AI_ENDPOINT.read().unwrap().as_str())?;
     let request = client.post(request_url)
         .json(&req);
 

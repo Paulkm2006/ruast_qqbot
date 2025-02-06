@@ -15,7 +15,7 @@ enum Identity {
 
 fn get_identity(sender: &Map<String, Value>) -> Identity {
     let user_id = sender["user_id"].as_u64().unwrap();
-    if user_id == *OWNER_ID.lock().unwrap() {
+    if user_id == *OWNER_ID.read().unwrap() {
         Identity::Owner
     } else {
         Identity::User
@@ -85,7 +85,6 @@ async fn default_handler(sender: &str, msg: &str, img: &Vec<ImgData>, _sender: &
         for i in img {
             let desc = crate::module::ai_img::process_image(&i).await?;
             prompt += &format!("收到一张图片：{}\n{}\n", i.summary, desc);
-            println!("Image description: {}", desc);
         }
     }
     prompt += msg;
@@ -132,7 +131,6 @@ pub async fn handle(msg: &Value, db: Arc<Client>) -> Result<Option<RetMessage>, 
             in_msg += txt;
         }
         if segment["type"] == "image" {
-            println!("1");
             if let Ok(img_data) = serde_json::from_value::<ImgData>(segment["data"].clone()){
                 if img_data.file_size.parse::<u64>().unwrap() > 1024 {
                     in_img.push(img_data);
