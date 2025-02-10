@@ -27,16 +27,16 @@ async fn process_command(msg: &str, sender: &Map<String, Value>, db: Arc<Client>
         }
         "ai" => {
             if args.get(0) == Some(&"!clear") {
-                crate::module::ai::clear_record(0, db.clone(), "main")?;
+                crate::module::ai::clear_record(0, db.clone(), "main").await?;
                 if args.get(1) == Some(&"all") {
                     let bots = vec!["gemini_2_0".to_string(), "jv6tFQ5q".to_string(), "zzWzZzSg".to_string()];
                     for bot in bots {
-                        crate::module::ai::clear_record(0, db.clone(), &bot)?
+                        crate::module::ai::clear_record(0, db.clone(), &bot).await?
                     }
                 }
                 vec![Data::string("Record cleared".to_string())]
             } else if args.get(0) == Some(&"!model") {
-                crate::module::ai::set_model(0, db, args.get(1).unwrap_or(&""))?
+                crate::module::ai::set_model(0, db, args.get(1).unwrap_or(&"")).await?
             } else {
 				crate::module::ai::main_conversation(None, db, &args.join(" ")).await?
             }

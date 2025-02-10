@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use redis::{Client, Commands};
+use redis::{Client, AsyncCommands};
 use uuid::Uuid;
 use crate::constants::{*};
 use futures::StreamExt;
@@ -12,46 +12,47 @@ use crate::dto::{*};
 // Add global lock to ensure a single main conversation process at a time.
 static MAIN_CONVO_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-pub fn clear_record(gid: u64, db:Arc<Client>, b: &str) -> Result<(), crate::handler::DynErr> {
-	let mut conn = db.get_connection()?;
+pub async fn clear_record(gid: u64, db:Arc<Client>, b: &str) -> Result<(), crate::handler::DynErr> {
+	let mut conn = db.get_multiplexed_async_connection().await?;
 	let bot;
 
 	if b == "main" {
-		let main_model: String = conn.get(format!("ai:{}:model",gid)).unwrap_or_else(|_| AI_DEFAULT_MODEL.read().unwrap().clone());
+		let main_model: String = conn.get(format!("ai:{}:model",gid)).await.unwrap_or_else(|_| AI_DEFAULT_MODEL.read().unwrap().clone());
 		bot = main_model.replace("-", "_").replace(".", "_");
 	}else{
 		bot = b.to_string();
 	}
-	let _: () = conn.set(format!("ai:{}:{}:conv", gid, bot), Uuid::new_v4().to_string())?;
-	let _: () = conn.set(format!("ai:{}:{}:prev", gid, bot), Uuid::new_v4().to_string())?;
-	let _: () = conn.set(format!("ai:{}:{}:now", gid, bot), Uuid::new_v4().to_string())?;
-	let _: () = conn.set(format!("ai:{}:{}:count", gid, bot), 0)?;
+	let _: () = conn.set(format!("ai:{}:{}:conv", gid, bot), Uuid::new_v4().to_string()).await?;
+	let _: () = conn.set(format!("ai:{}:{}:prev", gid, bot), Uuid::new_v4().to_string()).await?;
+	let _: () = conn.set(format!("ai:{}:{}:now", gid, bot), Uuid::new_v4().to_string()).await?;
+	let _: () = conn.set(format!("ai:{}:{}:count", gid, bot), 0).await?;
 
 	Ok(())
 }
 
-pub fn set_model(gid: u64, db:Arc<Client>, model: &str) -> Result<Vec<Data>, crate::handler::DynErr> {
+pub async fn set_model(gid: u64, db:Arc<Client>, model: &str) -> Result<Vec<Data>, crate::handler::DynErr> {
 
-	let mut conn = db.get_connection()?;
-	let _: () = conn.set(format!("ai:model:{}", gid), model.to_string())?;
+	let mut conn = db.get_multiplexed_async_connection().await?;
+	let _: () = conn.set(format!("ai:model:{}", gid), model.to_string()).await?;
 
-	clear_record(gid, db, "main")?;
+	clear_record(gid, db, "main").await?;
 	Ok(vec![Data::string("Model set".to_string())])
 }
 
-pub fn check_join(gid: u64, db:Arc<Client>) -> Result<bool, crate::handler::DynErr> {
-	let mut conn = db.get_connection()?;
-	Ok(conn.exists(format!("ai:{}:JOIN", gid))?)
+pub async fn check_join(gid: u64, db:Arc<Client>) -> Result<bool, crate::handler::DynErr> {
+	let mut conn = db.get_multiplexed_async_connection().await?;
+	Ok(conn.exists(format!("ai:{}:JOIN", gid)).await?)
 }
 
-pub fn set_join(gid: u64, db:Arc<Client>) -> Result<(), crate::handler::DynErr> {
-	let mut conn = db.get_connection()?;
+pub async fn set_join(gid: u64, db:Arc<Client>) -> Result<(), crate::handler::DynErr> {
+	let mut conn = db.get_multiplexed_async_connection().await?;
 	let key = format!("ai:{}:JOIN", gid);
-	if conn.exists(&key)? {
-		let _:() = conn.expire(key, AI_ENGAGE_TIME.read().unwrap().clone())?;
+	let t = AI_ENGAGE_TIME.read().unwrap().clone();
+	if conn.exists(&key).await? {
+		let _:() = conn.expire(key, t).await?;
 	}else{
-		let _:() = conn.set(&key, 1)?;
-		let _:() = conn.expire(key, AI_ENGAGE_TIME.read().unwrap().clone())?;
+		let _:() = conn.set(&key, 1).await?;
+		let _:() = conn.expire(key, t).await?;
 	}
 	Ok(())
 }
@@ -65,9 +66,9 @@ pub async fn main_conversation(gid: Option<u64>, db:Arc<Client>, msg: &str) -> R
 		None => 0,
 	};
 
-	let mut conn = db.get_connection()?;
+	let mut conn = db.get_multiplexed_async_connection().await?;
 
-	let main_model: String = conn.get(format!("ai:{}:model",gid)).unwrap_or_else(|_| AI_DEFAULT_MODEL.read().unwrap().clone());
+	let main_model: String = conn.get(format!("ai:{}:model",gid)).await.unwrap_or_else(|_| AI_DEFAULT_MODEL.read().unwrap().clone());
 	let main_bot = main_model.clone().replace("-", "_").replace(".", "_");
 
 	let resp;
@@ -95,11 +96,11 @@ pub async fn conversation(gid: u64, model: &str, bot: &str, db:Arc<Client>, msg:
 
 
 	let (conv, prev, now, count) = if !tool {
-		let mut conn = db.get_connection()?;
-		let conv: String = conn.get(format!("ai:{}:{}:conv", gid, bot))?;
-		let prev: String = conn.get(format!("ai:{}:{}:prev", gid, bot))?;
-		let now: String = conn.get(format!("ai:{}:{}:now", gid, bot))?;
-		let count: i32 = conn.get(format!("ai:{}:{}:count", gid, bot))?;
+		let mut conn = db.get_multiplexed_async_connection().await?;
+		let conv: String = conn.get(format!("ai:{}:{}:conv", gid, bot)).await?;
+		let prev: String = conn.get(format!("ai:{}:{}:prev", gid, bot)).await?;
+		let now: String = conn.get(format!("ai:{}:{}:now", gid, bot)).await?;
+		let count: i32 = conn.get(format!("ai:{}:{}:count", gid, bot)).await?;
 		(conv, prev, now, count)
 	} else {
 		(Uuid::new_v4().to_string(), Uuid::new_v4().to_string(), Uuid::new_v4().to_string(), 0)
@@ -175,10 +176,10 @@ pub async fn conversation(gid: u64, model: &str, bot: &str, db:Arc<Client>, msg:
 	let resp = send_request(&req).await?;
 
 	if !tool {
-		let mut conn = db.get_connection()?;
-		let _: () = conn.set(format!("ai:{}:{}:prev", gid, bot), next_msg)?;
-		let _: () = conn.set(format!("ai:{}:{}:now", gid, bot), Uuid::new_v4().to_string())?;
-		let _: () = conn.incr(format!("ai:{}:{}:count", gid, bot), 1)?;
+		let mut conn = db.get_multiplexed_async_connection().await?;
+		let _: () = conn.set(format!("ai:{}:{}:prev", gid, bot), next_msg).await?;
+		let _: () = conn.set(format!("ai:{}:{}:now", gid, bot), Uuid::new_v4().to_string()).await?;
+		let _: () = conn.incr(format!("ai:{}:{}:count", gid, bot), 1).await?;
 	}
 
     Ok(resp)

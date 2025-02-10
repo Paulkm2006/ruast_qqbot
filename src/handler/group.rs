@@ -54,17 +54,17 @@ async fn process_command(msg: &str, sender: &Map<String, Value>, db: Arc<Client>
         "ai" => {
             if args.get(0) == Some(&"!clear") {
                 allow!(sender, Identity::Owner); // Require owner for clear
-                crate::module::ai::clear_record(gid, db.clone(), "main")?;
+                crate::module::ai::clear_record(gid, db.clone(), "main").await?;
                 if args.get(1) == Some(&"all") {
                     let bots = vec!["gemini_2_0".to_string(), "jv6tFQ5q".to_string(), "zzWzZzSg".to_string()];
                     for bot in bots {
-                        crate::module::ai::clear_record(0, db.clone(), &bot)?
+                        crate::module::ai::clear_record(0, db.clone(), &bot).await?
                     }
                 }
                 vec![Data::string("Record cleared".to_string())]
             } else if args.get(0) == Some(&"!model") {
                 allow!(sender, Identity::Owner); // Require owner for model
-                crate::module::ai::set_model(gid, db, args.get(1).unwrap_or(&""))?
+                crate::module::ai::set_model(gid, db, args.get(1).unwrap_or(&"")).await?
             } else {
                 crate::module::ai::main_conversation(Some(gid), db, &args.join(" ")).await?
             }
@@ -144,13 +144,13 @@ pub async fn handle(msg: &Value, db: Arc<Client>) -> Result<Option<RetMessage>, 
             let v = process_command(&in_msg, &s, db, gid).await?;
             Ok(Some(resp(v, gid)))
         } else {
-            crate::module::ai::set_join(gid, db.clone())?;
+            crate::module::ai::set_join(gid, db.clone()).await?;
             let nickname = s["nickname"].as_str().unwrap_or_else(|| "Unknown");
             let v = default_handler(nickname, &in_msg, &in_img, &s, db, gid).await?;
             Ok(Some(resp(v, gid)))
         }
     }else{
-        if crate::module::ai::check_join(gid, db.clone())? {
+        if crate::module::ai::check_join(gid, db.clone()).await? {
             let nickname = s["nickname"].as_str().unwrap_or_else(|| "Unknown");
             let v = default_handler(nickname, &in_msg, &in_img, &s, db, gid).await?;
             Ok(Some(resp(v, gid)))
