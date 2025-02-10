@@ -15,6 +15,18 @@ impl Data {
             data: Value::Object(json!({ "text": text }).as_object().unwrap().clone()),
         }
     }
+    pub fn at(qq: u64) -> Data {
+        Data {
+            type_: "at".to_string(),
+            data: Value::Object(json!({ "qq": qq.to_string() }) .as_object().unwrap().clone()),
+        }
+    }
+    pub fn reply(msg: u64) -> Data {
+        Data {
+            type_: "reply".to_string(),
+            data: Value::Object(json!({ "id": msg }).as_object().unwrap().clone()),
+        }
+    }
 }
 
 

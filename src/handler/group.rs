@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::{Map, Value};
+use crate::module::ai_img::process_image;
+
 use super::super::dto::{*};
 use super::DynErr;
 use super::super::constants::OWNER_ID;
@@ -77,18 +79,25 @@ async fn process_command(msg: &str, sender: &Map<String, Value>, db: Arc<Client>
     Ok(ret)
 }
 
-async fn default_handler(sender: &str, msg: &str, img: &Vec<ImgData>, _sender: &Map<String, Value>, db:Arc<Client>, gid: u64) -> Result<Vec<Data>, DynErr> {
-    
-    
-    let mut prompt = sender.to_owned() + "说：\n";
+async fn default_handler(sender: &Map<String, Value>, msg: &str, img: &Vec<ImgData>, _sender: &Map<String, Value>, db:Arc<Client>, gid: u64, reply: Option<u64>) -> Result<Vec<Data>, DynErr> {
+    let mut prompt = sender["nickname"].as_str().unwrap().to_string();
+    prompt += "发送了以下内容：\n";
+    if !msg.is_empty() {
+        prompt += "文字：";
+        prompt += msg;
+        prompt += "\n";
+    }
     if !img.is_empty() {
-        for i in img {
-            let desc = crate::module::ai_img::process_image(&i).await?;
-            prompt += &format!("收到一张图片：{}\n{}\n", i.summary, desc);
+        for i in img{
+            prompt += &format!("图片：{} {}\n", i.summary, process_image(i).await?);
         }
     }
-    prompt += msg;
-    Ok(crate::module::ai::main_conversation(Some(gid), db, &prompt).await?)
+    let mut ret = crate::module::ai::main_conversation(Some(gid), db, &prompt).await?;
+    if let Some(id) = reply {
+        ret.insert(0,Data::reply(id));
+        ret.insert(0, Data::at(sender["user_id"].as_u64().unwrap()));
+    }
+    Ok(ret)
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -136,6 +145,14 @@ pub async fn handle(msg: &Value, db: Arc<Client>) -> Result<Option<RetMessage>, 
                     in_img.push(img_data);
                 }
             }
+            else if let Some(img_summary) = segment["data"]["summary"].as_str() {
+                in_img.push(ImgData{
+                    file: "".to_string(),
+                    url: "".to_string(),
+                    file_size: "".to_string(),
+                    summary: img_summary.to_string(),
+                });
+            }
         }
     }
 
@@ -145,14 +162,12 @@ pub async fn handle(msg: &Value, db: Arc<Client>) -> Result<Option<RetMessage>, 
             Ok(Some(resp(v, gid)))
         } else {
             crate::module::ai::set_join(gid, db.clone()).await?;
-            let nickname = s["nickname"].as_str().unwrap_or_else(|| "Unknown");
-            let v = default_handler(nickname, &in_msg, &in_img, &s, db, gid).await?;
+            let v = default_handler(s, &in_msg, &in_img, &s, db, gid, Some(msg["message_id"].as_u64().unwrap())).await?;
             Ok(Some(resp(v, gid)))
         }
     }else{
         if crate::module::ai::check_join(gid, db.clone()).await? {
-            let nickname = s["nickname"].as_str().unwrap_or_else(|| "Unknown");
-            let v = default_handler(nickname, &in_msg, &in_img, &s, db, gid).await?;
+            let v = default_handler(s, &in_msg, &in_img, &s, db, gid, None).await?;
             Ok(Some(resp(v, gid)))
         } else {
             Ok(None)

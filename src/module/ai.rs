@@ -6,6 +6,7 @@ use futures::StreamExt;
 use reqwest_eventsource::{Event, EventSource};
 use tokio::sync::Mutex;
 use once_cell::sync::Lazy;
+use tokio::time::{timeout, Duration}; // add timeout
 
 use crate::dto::{*};
 
@@ -59,8 +60,10 @@ pub async fn set_join(gid: u64, db:Arc<Client>) -> Result<(), crate::handler::Dy
 
 
 pub async fn main_conversation(gid: Option<u64>, db:Arc<Client>, msg: &str) -> Result<Vec<Data>, crate::handler::DynErr>{
-    // Ensure only one main conversation runs concurrently.
-    let _lock = MAIN_CONVO_LOCK.lock().await;
+    // Use a timeout when acquiring the lock to avoid deadlocks.
+    let _lock = tokio::time::timeout(Duration::from_secs(120), MAIN_CONVO_LOCK.lock())
+        .await
+        .map_err(|_| "Timeout waiting for conversation lock")?;
 	let gid = match gid {
 		Some(gid) => gid,
 		None => 0,
@@ -68,44 +71,25 @@ pub async fn main_conversation(gid: Option<u64>, db:Arc<Client>, msg: &str) -> R
 
 	let mut conn = db.get_multiplexed_async_connection().await?;
 
+
 	let main_model: String = conn.get(format!("ai:{}:model",gid)).await.unwrap_or_else(|_| AI_DEFAULT_MODEL.read().unwrap().clone());
 	let main_bot = main_model.clone().replace("-", "_").replace(".", "_");
 
-	let resp;
-	let mut next_msg = msg.to_owned();
 
+	println!("AI request: {:?}", msg);
+	let main_resp = conversation(gid, &main_model, &main_bot, db.clone(), &msg).await?;
+	println!("AI response: {:?}", main_resp);
 
-	loop {
-		println!("AI request: {:?}", next_msg);
-		let main_resp = conversation(gid, &main_model, &main_bot, db.clone(), &next_msg, false).await?;
-		println!("AI response: {:?}", main_resp);
-		if main_resp.starts_with("!#[") {
-			let tool_resp = use_tool(db.clone(), &main_resp).await?;
-			next_msg = tool_resp;
-		} else {
-			resp = main_resp;
-			break;
-		}
-	}
-
-	Ok(vec![Data::string(resp)])
+	Ok(vec![Data::string(main_resp)])
 }
 
-pub async fn conversation(gid: u64, model: &str, bot: &str, db:Arc<Client>, msg: &str, tool: bool) -> Result<String, crate::handler::DynErr> {
+pub async fn conversation(gid: u64, model: &str, bot: &str, db:Arc<Client>, msg: &str) -> Result<String, crate::handler::DynErr> {
 
-
-
-	let (conv, prev, now, count) = if !tool {
-		let mut conn = db.get_multiplexed_async_connection().await?;
-		let conv: String = conn.get(format!("ai:{}:{}:conv", gid, bot)).await?;
-		let prev: String = conn.get(format!("ai:{}:{}:prev", gid, bot)).await?;
-		let now: String = conn.get(format!("ai:{}:{}:now", gid, bot)).await?;
-		let count: i32 = conn.get(format!("ai:{}:{}:count", gid, bot)).await?;
-		(conv, prev, now, count)
-	} else {
-		(Uuid::new_v4().to_string(), Uuid::new_v4().to_string(), Uuid::new_v4().to_string(), 0)
-	};
-	
+	let mut conn = db.get_multiplexed_async_connection().await?;
+	let conv: String = conn.get(format!("ai:{}:{}:conv", gid, bot)).await?;
+	let prev: String = conn.get(format!("ai:{}:{}:prev", gid, bot)).await?;
+	let now: String = conn.get(format!("ai:{}:{}:now", gid, bot)).await?;
+	let count: i32 = conn.get(format!("ai:{}:{}:count", gid, bot)).await?;
 
 	let next_msg = Uuid::new_v4().to_string();
 
@@ -128,9 +112,7 @@ pub async fn conversation(gid: u64, model: &str, bot: &str, db:Arc<Client>, msg:
 				file_infos: None,
 			},
 		});
-		if !tool {
-			msg = INIT_PROMPT.read().unwrap().clone() + &msg;
-		}
+		msg = INIT_PROMPT.read().unwrap().clone() + &msg;
 	}
 
 	items.push(ConversationItem {
@@ -144,7 +126,7 @@ pub async fn conversation(gid: u64, model: &str, bot: &str, db:Arc<Client>, msg:
 			content: msg.to_string(),
 			quote_content: Some("".to_string()),
 			max_token: Some(0),
-			is_incognito: Some(tool),
+			is_incognito: Some(false),
 			file_infos: None,
 		},
 	});
@@ -161,7 +143,7 @@ pub async fn conversation(gid: u64, model: &str, bot: &str, db:Arc<Client>, msg:
 			origin_page_title: "o3-mini - Monica 智能体",
 			trigger_by: "auto",
 			use_model: model.to_owned(),
-			is_incognito: tool,
+			is_incognito: false,
 			use_new_memory: true,
 		},
 		language: "auto",
@@ -175,37 +157,14 @@ pub async fn conversation(gid: u64, model: &str, bot: &str, db:Arc<Client>, msg:
 
 	let resp = send_request(&req).await?;
 
-	if !tool {
-		let mut conn = db.get_multiplexed_async_connection().await?;
-		let _: () = conn.set(format!("ai:{}:{}:prev", gid, bot), next_msg).await?;
-		let _: () = conn.set(format!("ai:{}:{}:now", gid, bot), Uuid::new_v4().to_string()).await?;
-		let _: () = conn.incr(format!("ai:{}:{}:count", gid, bot), 1).await?;
-	}
+	let mut conn = db.get_multiplexed_async_connection().await?;
+	let _: () = conn.set(format!("ai:{}:{}:prev", gid, bot), next_msg).await?;
+	let _: () = conn.set(format!("ai:{}:{}:now", gid, bot), Uuid::new_v4().to_string()).await?;
+	let _: () = conn.incr(format!("ai:{}:{}:count", gid, bot), 1).await?;
 
     Ok(resp)
 }
 
-async fn use_tool(db: Arc<Client>, query: &str) -> Result<String, crate::handler::DynErr> {
-	let catch = regex::Regex::new(r"!#\[(\w+)\(").unwrap();
-	let tool = if let Some(caps) = catch.captures(query) {
-		if let Some(m) = caps.get(1) {
-			m.as_str()
-		} else {
-			return Ok("不合法的调用".to_owned());
-		}
-	} else {
-		return Ok("不合法的调用".to_owned());
-	};
-	match tool{
-		"search" | "getLastRate" | "getCryptoInformation" | "getIpInfo" | "searchNews" => {
-			conversation(0, "gpt-4o", "jv6tFQ5q", db, query, true).await
-		},
-		"readURL" | "getTopNews" | "getCurrentTime" | "getWeather" => {
-			conversation(0, "gpt-4o", "zzWzZzSg", db, query, true).await
-		},
-		_ => Ok("不合法的调用".to_owned()),
-	}
-}
 
 pub async fn send_request(req: &ChatData) -> Result<String, crate::handler::DynErr> {
 
@@ -229,20 +188,23 @@ pub async fn send_request(req: &ChatData) -> Result<String, crate::handler::DynE
     let mut event_source = EventSource::new(request)?;
     let mut resp = String::new();
 
-    while let Some(event) = event_source.next().await {
-        match event {
-            Ok(Event::Open) => { /* connection opened */ },
-            Ok(Event::Message(message)) => {
-                let v: serde_json::Value = serde_json::from_str(&message.data)?;
-                resp += v["text"].as_str().unwrap();
-				
-				if let Some(_) = v["finished"].as_bool() {
-					break;
-				}
+    loop {
+        match timeout(Duration::from_secs(30), event_source.next()).await {
+            Ok(Some(event)) => {
+                match event {
+                    Ok(Event::Open) => { /* connection opened */ },
+                    Ok(Event::Message(message)) => {
+                        let v: serde_json::Value = serde_json::from_str(&message.data)?;
+                        resp += v["text"].as_str().unwrap();
+                        if v.get("finished").and_then(|b| b.as_bool()).unwrap_or(false) {
+                            break;
+                        }
+                    },
+                    Err(e) => return Err(crate::handler::DynErr::from(e)),
+                }
             },
-			Err(e) => {
-				return Err(crate::handler::DynErr::from(e));
-			},
+            Ok(None) => break,
+            Err(_) => return Err("Timeout during event streaming".into()),
         }
     }
     Ok(resp)

@@ -1,4 +1,5 @@
-use std::{sync::Arc, thread::sleep, time::Duration};
+use std::sync::Arc;
+use tokio::time::{sleep, Duration}; // Replace std::thread::sleep and std::time::Duration
 
 use rand::prelude::*;
 use uuid::Uuid;
@@ -178,7 +179,7 @@ pub async fn upload_image(filename: &str, file_size: u64, url: &str) -> Result<I
 			}
 			_ => {}
 		}
-		sleep(Duration::from_millis(1000));
+		sleep(Duration::from_millis(1000)).await; // non-blocking sleep
 		t += 1;
 		if t > 5 {
 			return Err("Upload failed".to_string().into());

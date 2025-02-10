@@ -38,7 +38,6 @@ async fn main() -> std::io::Result<()> {
 
     loop {
         let msg = receiver.next().await.unwrap().unwrap();
-        println!("1");
         if msg.is_text() {
             let msg = msg.to_text().unwrap().to_string();
             let sender_clone = arc_sender.clone();
