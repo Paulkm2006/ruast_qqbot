@@ -16,7 +16,7 @@ use log::LevelFilter;
 async fn main() -> std::io::Result<()> {
     let config = config::init_config().await;
 
-    env_logger::builder().filter_level(LevelFilter::Debug).init();
+    env_logger::builder().filter_level(LevelFilter::Info).init();
     
     // Set owner ID at startup
     constants::set_owner_id(config.bot.owner);

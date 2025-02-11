@@ -17,7 +17,6 @@ pub type DynErr = Box<dyn std::error::Error + Send + Sync>;
 async fn send(response: RetMessage, sender: Sender) -> Result<(), DynErr> {
 	let j = serde_json::to_string(&response).unwrap();
 	let message = Message::Text(j.into());
-	log::debug!("1");
 	sender.lock().await.send(message).await?;
 	Ok(())
 }
