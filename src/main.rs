@@ -8,10 +8,15 @@ use core::panic;
 use tokio_tungstenite::connect_async;
 use futures::StreamExt;
 use redis::Client;
+use log::{info,error};
+use log::LevelFilter;
+
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let config = config::init_config().await;
+
+    env_logger::builder().filter_level(LevelFilter::Debug).init();
     
     // Set owner ID at startup
     constants::set_owner_id(config.bot.owner);
@@ -29,7 +34,8 @@ async fn main() -> std::io::Result<()> {
     let addr = config.api.url + "/?access_token=" + &config.api.access_token;
 
     let (socket, response) = connect_async(addr).await.unwrap();
-    println!("Connected to the server: {:?}", response);
+
+    info!("Connected to the server: {:?}", response);
 
     let (sender, mut receiver) = socket.split();
 
@@ -45,7 +51,7 @@ async fn main() -> std::io::Result<()> {
             
             tokio::spawn(async move {
                 if let Err(e) = handler::recv(&msg, sender_clone, db_clone).await {
-                    eprintln!("Thread error: {:?}", e);
+                    error!("Thread error: {:?}", e);
                 }
             });
         } else {

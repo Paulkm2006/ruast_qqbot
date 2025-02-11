@@ -8,6 +8,7 @@ use super::super::dto::{*};
 use super::DynErr;
 use super::super::constants::OWNER_ID;
 use redis::Client;
+use log::{info,error};
 
 #[derive(PartialEq)]
 enum Identity {
@@ -37,7 +38,7 @@ macro_rules! allow {
     };
 }
 
-async fn process_command(msg: &str, sender: &Map<String, Value>, db: Arc<Client>, gid: u64) -> Result<Vec<Data>, DynErr> {
+async fn process_command(msg_id: u64, msg: &str, sender: &Map<String, Value>, db: Arc<Client>, gid: u64) -> Result<Vec<Data>, DynErr> {
     let mut msg = msg.split_whitespace();
     let cmd = msg.next().unwrap();
     let args = msg.collect::<Vec<&str>>();
@@ -57,12 +58,6 @@ async fn process_command(msg: &str, sender: &Map<String, Value>, db: Arc<Client>
             if args.get(0) == Some(&"!clear") {
                 allow!(sender, Identity::Owner); // Require owner for clear
                 crate::module::ai::clear_record(gid, db.clone(), "main").await?;
-                if args.get(1) == Some(&"all") {
-                    let bots = vec!["gemini_2_0".to_string(), "jv6tFQ5q".to_string(), "zzWzZzSg".to_string()];
-                    for bot in bots {
-                        crate::module::ai::clear_record(0, db.clone(), &bot).await?
-                    }
-                }
                 vec![Data::string("Record cleared".to_string())]
             } else if args.get(0) == Some(&"!model") {
                 allow!(sender, Identity::Owner); // Require owner for model
@@ -76,11 +71,13 @@ async fn process_command(msg: &str, sender: &Map<String, Value>, db: Arc<Client>
         }
     };
 
+    info!("[{msg_id} <=cmd] {}", ret[0].data["text"]);
+
     Ok(ret)
 }
 
-async fn default_handler(sender: &Map<String, Value>, msg: &str, img: &Vec<ImgData>, _sender: &Map<String, Value>, db:Arc<Client>, gid: u64, reply: Option<u64>) -> Result<Vec<Data>, DynErr> {
-    let mut prompt = sender["nickname"].as_str().unwrap().to_string();
+async fn default_handler(msg_id: u64, nick: String, uid: u64, msg: &str, img: &Vec<ImgData>, db:Arc<Client>, gid: u64, reply: Option<u64>) -> Result<Vec<Data>, DynErr> {
+    let mut prompt = nick.clone();
     prompt += "发送了以下内容：\n";
     if !msg.is_empty() {
         prompt += "文字：";
@@ -93,9 +90,10 @@ async fn default_handler(sender: &Map<String, Value>, msg: &str, img: &Vec<ImgDa
         }
     }
     let mut ret = crate::module::ai::main_conversation(Some(gid), db, &prompt).await?;
+    info!("[{msg_id} <=ai_reply] {}", ret[0].data["text"]);
     if let Some(id) = reply {
         ret.insert(0,Data::reply(id));
-        ret.insert(0, Data::at(sender["user_id"].as_u64().unwrap()));
+        ret.insert(0, Data::at(uid));
     }
     Ok(ret)
 }
@@ -108,6 +106,7 @@ struct GroupMessageParams {
 
 fn resp(r: Vec<Data>, gid: u64) -> RetMessage {
 
+    
     let v = serde_json::to_value(GroupMessageParams {
         group_id: gid.to_string(),
         message: r,
@@ -122,8 +121,11 @@ fn resp(r: Vec<Data>, gid: u64) -> RetMessage {
 pub async fn handle(msg: &Value, db: Arc<Client>) -> Result<Option<RetMessage>, DynErr> 
 {
     let s = msg["sender"].as_object().unwrap();
+    let s_id = s["user_id"].as_u64().unwrap();
+    let s_nick = s["nickname"].as_str().unwrap();
     let m = msg["message"].as_array().unwrap();
     let self_id = msg["self_id"].as_u64().unwrap();
+    let msg_id = msg["message_id"].as_u64().unwrap();
 
     let mut at = false;
     let mut in_msg = String::new();
@@ -142,10 +144,12 @@ pub async fn handle(msg: &Value, db: Arc<Client>) -> Result<Option<RetMessage>, 
         if segment["type"] == "image" {
             if let Ok(img_data) = serde_json::from_value::<ImgData>(segment["data"].clone()){
                 if img_data.file_size.parse::<u64>().unwrap() > 1024 {
+                    info!("[{msg_id} {gid} {s_nick}] <=image] {}", img_data.file);
                     in_img.push(img_data);
                 }
             }
             else if let Some(img_summary) = segment["data"]["summary"].as_str() {
+                info!("[{msg_id} {gid} {s_nick}] <=sticker] {}", img_summary);
                 in_img.push(ImgData{
                     file: "".to_string(),
                     url: "".to_string(),
@@ -156,19 +160,31 @@ pub async fn handle(msg: &Value, db: Arc<Client>) -> Result<Option<RetMessage>, 
         }
     }
 
+
     if at {
-        if in_msg.starts_with(" ~") {
-            let v = process_command(&in_msg, &s, db, gid).await?;
-            Ok(Some(resp(v, gid)))
+        
+        let v = if in_msg.starts_with(" ~") {
+            info!("[{msg_id} {gid} {s_nick}] >=cmd] {}", in_msg);
+            process_command(msg_id, &in_msg, &s, db, gid).await
         } else {
             crate::module::ai::set_join(gid, db.clone()).await?;
-            let v = default_handler(s, &in_msg, &in_img, &s, db, gid, Some(msg["message_id"].as_u64().unwrap())).await?;
-            Ok(Some(resp(v, gid)))
-        }
+            info!("[{msg_id} {gid} {s_nick}] >=ai_at] {}", in_msg);
+            default_handler(msg_id, s_nick.to_owned(),s_id, &in_msg, &in_img, db, gid, Some(msg_id)).await
+        };
+
+        let r = v.unwrap_or_else(|e| {
+            error!("[{msg_id}] <=at] {}", e);
+            vec![Data::string(format!("Error: {:?}", e))] });
+
+        Ok(Some(resp(r, gid)))
     }else{
         if crate::module::ai::check_join(gid, db.clone()).await? {
-            let v = default_handler(s, &in_msg, &in_img, &s, db, gid, None).await?;
-            Ok(Some(resp(v, gid)))
+            info!("[{msg_id} {gid} {s_nick}] =>ai_auto] {}", in_msg);
+            let v = default_handler(msg_id, s_nick.to_owned(),s_id, &in_msg, &in_img, db, gid, None).await;
+            let r = v.unwrap_or_else(|e| {
+                error!("[{msg_id} <=ai_auto>] {:?}", e);
+                vec![Data::string(format!("Error: {:?}", e))] });
+            Ok(Some(resp(r, gid)))
         } else {
             Ok(None)
         }

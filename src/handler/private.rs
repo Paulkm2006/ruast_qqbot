@@ -49,8 +49,8 @@ async fn process_command(msg: &str, sender: &Map<String, Value>, db: Arc<Client>
     Ok(ret)
 }
 
-fn default_handler(_msg: &str, _sender: &Map<String, Value>) -> Result<Option<Vec<Data>>, DynErr> {
-    Ok(None)
+fn _default_handler(_msg: &str, _sender: &Map<String, Value>) -> Result<Vec<Data>, DynErr> {
+    Ok(vec![])
 }
 
 #[derive(Serialize, Debug, Clone)]
@@ -59,10 +59,12 @@ struct PrivateMessageParams {
 	message: Vec<Data>,
 }
 
-fn resp(r: Vec<Data>, uid: u64) -> RetMessage {
+fn resp(r: Result<Vec<Data>, DynErr>, uid: u64) -> RetMessage {
+
+    let re = r.unwrap_or_else(|e| vec![Data::string(format!("Error: {:?}", e))]);
     let v = serde_json::to_value(PrivateMessageParams {
         user_id: uid.to_string(),
-        message: r,
+        message: re,
     }).unwrap();
 
     RetMessage {
@@ -85,16 +87,11 @@ pub async fn handle(msg: &Value, db: Arc<Client>) -> Result<Option<RetMessage>, 
         }
     }
 
-    if in_msg.starts_with("~") {
-        let v = process_command(&in_msg, &s, db).await?;
-        Ok(Some(resp(v, msg["target_id"].as_u64().unwrap())))
+    let v = if in_msg.starts_with("~") {
+        process_command(&in_msg, &s, db).await
     } else {
-        let v = default_handler(&in_msg, &s)?;
-        if let Some(v) = v {
-            Ok(Some(resp(v, msg["target_id"].as_u64().unwrap())))
-        } else {
-            Ok(None)
-        }
-    }
+        return Ok(None);
+    };
+    Ok(Some(resp(v, msg["target_id"].as_u64().unwrap())))
 }
 

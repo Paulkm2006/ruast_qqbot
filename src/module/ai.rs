@@ -8,6 +8,8 @@ use tokio::sync::Mutex;
 use once_cell::sync::Lazy;
 use tokio::time::{timeout, Duration}; // add timeout
 
+
+
 use crate::dto::{*};
 
 // Add global lock to ensure a single main conversation process at a time.
@@ -75,10 +77,7 @@ pub async fn main_conversation(gid: Option<u64>, db:Arc<Client>, msg: &str) -> R
 	let main_model: String = conn.get(format!("ai:{}:model",gid)).await.unwrap_or_else(|_| AI_DEFAULT_MODEL.read().unwrap().clone());
 	let main_bot = main_model.clone().replace("-", "_").replace(".", "_");
 
-
-	println!("AI request: {:?}", msg);
 	let main_resp = conversation(gid, &main_model, &main_bot, db.clone(), &msg).await?;
-	println!("AI response: {:?}", main_resp);
 
 	Ok(vec![Data::string(main_resp)])
 }

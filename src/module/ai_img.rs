@@ -13,7 +13,6 @@ use super::ai::send_request;
 
 pub async fn process_image(data: &ImgData) -> Result<String, crate::handler::DynErr> {
 	let filename = data.file.clone();
-	println!("Processing image: {}", filename);
 	let file_size = data.file_size.parse::<u64>().unwrap();
 	let url = data.url.clone();
 	let item = upload_image(&filename, file_size, &url).await?;
@@ -88,8 +87,6 @@ pub async fn explain_image(img: ImageItem) -> Result<String, crate::handler::Dyn
 	};
 
 	let resp = send_request(&req).await?;
-
-	println!("Picture description: {}", resp);
 	
 	Ok(resp)
 }
