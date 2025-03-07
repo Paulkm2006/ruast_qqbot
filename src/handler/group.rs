@@ -6,7 +6,7 @@ use crate::module::ai_img::process_image;
 
 use super::super::dto::{*};
 use super::DynErr;
-use super::super::constants::OWNER_ID;
+use super::super::constants::{OWNER_ID, AI_AUTO_JOIN};
 use redis::Client;
 use log::{info,error};
 
@@ -178,7 +178,7 @@ pub async fn handle(msg: &Value, db: Arc<Client>) -> Result<Option<RetMessage>, 
 
         Ok(Some(resp(r, gid)))
     }else{
-        if crate::module::ai::check_join(gid, db.clone()).await? {
+        if *AI_AUTO_JOIN.read().unwrap() && crate::module::ai::check_join(gid, db.clone()).await? {
             info!("[{msg_id} {gid} {s_nick}] =>ai_auto] {}", in_msg);
             let v = default_handler(msg_id, s_nick.to_owned(),s_id, &in_msg, &in_img, db, gid, None).await;
             let r = v.unwrap_or_else(|e| {

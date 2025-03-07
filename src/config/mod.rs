@@ -33,6 +33,7 @@ pub struct Ai {
     pub default_model: String,
 	pub init_prompt: String,
 	pub engage_time: i64,
+	pub auto_join: bool,
 }
 
 
