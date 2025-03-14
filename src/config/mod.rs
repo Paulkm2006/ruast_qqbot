@@ -48,7 +48,7 @@ pub fn init_config_from_file(path: &str) -> Result<Config, Box<dyn std::error::E
 
 
 pub async fn init_config() -> Config {
-	match init_config_from_file("config.toml") {
+	match init_config_from_file("config/config.toml") {
 		Ok(config) => config,
 		Err(e) => {
 			panic!("Failed to load config from file: {}", e);
